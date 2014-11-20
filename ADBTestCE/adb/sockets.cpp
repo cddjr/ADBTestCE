@@ -551,6 +551,7 @@ asocket *create_remote_socket(unsigned id, atransport *t)
 void connect_to_remote(asocket *s, const char *destination)
 {
     D("Connect_to_remote call RS(%d) fd=%d\n", s->id, s->fd);
+	logcat(L"connect_to_remote");
     apacket *p = get_apacket();
     int len = strlen(destination) + 1;
 
@@ -777,7 +778,7 @@ static int smart_socket_enqueue(asocket *s, apacket *p)
             ** that its work is done.
             */
         adb_write(s->peer->fd, "OKAY", 4);
-
+		logcat(L"create_host_service_socket OKAY");
         s->peer->ready = local_socket_ready;
         s->peer->close = local_socket_close;
         s->peer->peer = s2;

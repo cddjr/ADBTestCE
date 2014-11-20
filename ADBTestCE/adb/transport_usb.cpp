@@ -56,6 +56,7 @@ static int remote_read(apacket *p, atransport *t)
 {
     if(usb_read(t->usb, &p->msg, sizeof(amessage))){
         D("remote usb: read terminated (message)\n");
+		logcat(L"remote usb: read terminated (message)");
         return -1;
     }
 
@@ -63,18 +64,21 @@ static int remote_read(apacket *p, atransport *t)
 
     if(check_header(p)) {
         D("remote usb: check_header failed\n");
+		logcat(L"remote usb: check_header failed");
         return -1;
     }
 
     if(p->msg.data_length) {
         if(usb_read(t->usb, p->data, p->msg.data_length)){
             D("remote usb: terminated (data)\n");
+			logcat(L"remote usb: terminated (data)");
             return -1;
         }
     }
 
     if(check_data(p)) {
         D("remote usb: check_data failed\n");
+		logcat(L"remote usb: check_data failed");
         return -1;
     }
 

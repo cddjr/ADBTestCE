@@ -118,7 +118,7 @@ int usb_close(usb_handle* handle);
 const char *usb_name(usb_handle* handle);
 
 int known_device_locked(const char* dev_name) {
-    return 0;
+
   usb_handle* usb;
 
   if (NULL != dev_name) {
@@ -127,11 +127,20 @@ int known_device_locked(const char* dev_name) {
       // In Windows names are not case sensetive!
       if((NULL != usb->interface_name) &&
          (0 == _stricmp(usb->interface_name, dev_name))) {
+		//logcat(L"known_device_locked found");
         return 1;
-      }
+	  } else {
+		  wchar_t wLog[MAX_PATH] = {0};
+		  wchar_t wInterfaceName[MAX_PATH] = {0};
+		  wchar_t wDevName[MAX_PATH] = {0};
+		  MultiByteToWideChar(GetACP(), 0, usb->interface_name, -1, wInterfaceName, MAX_PATH);
+	      MultiByteToWideChar(GetACP(), 0, dev_name, -1, wDevName, MAX_PATH);
+		  _stprintf(wLog, L"interface:%s, dev_name:%s", wInterfaceName, wDevName);
+		  logcat(wLog);
+	  }
     }
   }
-
+  logcat(L"known_device_locked not found");
   return 0;
 }
 
@@ -221,7 +230,7 @@ usb_handle* do_usb_open(const wchar_t* interface_name) {
                                    AdbOpenSharingModeReadWrite);
   if (NULL != ret->adb_read_pipe) {
     // Open write pipe (endpoint)
-	  logcat(L"AdbOpenDefaultBulkWriteEndpoint");
+	 
     ret->adb_write_pipe =
       AdbOpenDefaultBulkWriteEndpoint(ret->adb_interface,
                                       AdbOpenAccessTypeReadWrite,
@@ -278,6 +287,9 @@ int usb_write(usb_handle* handle, const void* data, int len) {
   int ret;
 
   D("usb_write %d\n", len);
+  wchar_t wLog[32];
+  _stprintf(wLog, L"usb_write %d", len);
+  logcat(wLog);
   if (NULL != handle) {
     // Perform write
     ret = AdbWriteEndpointSync(handle->adb_write_pipe,
@@ -309,11 +321,12 @@ int usb_write(usb_handle* handle, const void* data, int len) {
     errno = saved_errno;
   } else {
     D("usb_write NULL handle\n");
+	logcat(L"usb write null handle");
     SetLastError(ERROR_INVALID_HANDLE);
   }
 
   D("usb_write failed: %d\n", errno);
-
+  logcat(L"usb write failed.");
   return -1;
 }
 
@@ -325,6 +338,9 @@ int usb_read(usb_handle *handle, void* _data, int len) {
   int ret;
 
   D("usb_read %d\n", len);
+  wchar_t wLog[MAX_PATH];
+  _stprintf(wLog, L"usb read %d", len);
+  logcat(wLog);
   if (NULL != handle) {
     while (len > 0) {
       int xfer = (len > 4096) ? 4096 : len;
@@ -335,11 +351,16 @@ int usb_read(usb_handle *handle, void* _data, int len) {
                                   &read,
                                   time_out);
       int saved_errno = GetLastError();
-      D("usb_write got: %ld, expected: %d, errno: %d\n", read, xfer, saved_errno);
+      //D("usb_read got: %ld, expected: %d, errno: %d\n", read, xfer, saved_errno);
+	  //_stprintf(wLog, L"usb_read got: %ld, expected: %d, errno: %d\n", read, xfer, saved_errno);
+	  logcat(wLog);
       if (ret) {
+	    //_stprintf(wLog, L"len before = %d, read = %ld", len, read);
+		//logcat(wLog);
         data += read;
         len -= read;
-
+		//_stprintf(wLog, L"ret = %d, len = %d", ret, len);
+		//logcat(wLog);
         if (len == 0)
           return 0;
       } else {
@@ -352,9 +373,11 @@ int usb_read(usb_handle *handle, void* _data, int len) {
     }
   } else {
     D("usb_read NULL handle\n");
+	logcat(L"usb read null handle");
     SetLastError(ERROR_INVALID_HANDLE);
   }
 
+  logcat(L"usb read failed.");
   D("usb_read failed: %d\n", errno);
 
   return -1;
@@ -379,6 +402,7 @@ void usb_cleanup_handle(usb_handle* handle) {
 }
 
 void usb_kick(usb_handle* handle) {
+	logcat(L"usb kick");
   if (NULL != handle) {
     adb_mutex_lock(&usb_lock);
 
@@ -502,6 +526,8 @@ void find_devices() {
     *copy_name = '\0';
 */
     // Lets see if we already have this device in the list
+  unsigned long len = 0;
+  AdbGetInterfaceName(NULL, interf_name, &len, true);
     if (!known_device(interf_name)) {
       // This seems to be a new device. Open it!
 		handle = do_usb_open(L"AID1:");
@@ -522,7 +548,7 @@ void find_devices() {
 		    wchar_t wSerialNumber[MAX_PATH];
 			wchar_t wLog[MAX_PATH];
 			MultiByteToWideChar(CP_ACP, 0, serial_number, -1, wSerialNumber, MAX_PATH);
-			_stprintf(wLog, L"serial number = %s, -- %s", serial_number, wSerialNumber);
+			_stprintf(wLog, L"serial number = %s", wSerialNumber);
 			logcat(wLog);
             if (register_new_device(handle)) {
               register_usb_transport(handle, serial_number, NULL, 1);

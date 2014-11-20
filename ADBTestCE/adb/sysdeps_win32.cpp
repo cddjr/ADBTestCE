@@ -264,7 +264,7 @@ static int
 _fh_file_write( FH  f,  const void*  buf, int   len )
 {
     DWORD  wrote_bytes;
-
+	logcat(L"_fh_file_write");
     if ( !WriteFile( f->fh_handle, buf, (DWORD)len, &wrote_bytes, NULL ) ) {
         D( "adb_file_write: could not write %d bytes from %s\n", len, f->name );
         errno = EIO;
@@ -439,8 +439,9 @@ int  adb_read(int  fd, void* buf, int len)
 int  adb_write(int  fd, const void*  buf, int  len)
 {
     FH     f = _fh_from_int(fd);
-
+	logcat(L"adb_write");
     if (f == NULL) {
+		logcat(L"adb write null fd");
         return -1;
     }
 
@@ -561,7 +562,7 @@ static int
 _fh_socket_write( FH  f, const void*  buf, int  len )
 {
 	wchar_t wLog[MAX_PATH];
-	
+	logcat(L"_fh_socket_write");
     int  result = send( f->fh_socket, (const char*)buf, len, 0 );
 	_stprintf(wLog, L"_fh_socket_write: sockect = %d, len = %d, result = %d", f->fh_socket, len, result);
 	logcat(wLog);
@@ -1248,6 +1249,7 @@ _fh_socketpair_read( FH  f, void* buf, int  len )
 static int
 _fh_socketpair_write( FH  f, const void*  buf, int  len )
 {
+	logcat(L"_fh_socketpair_write");
     SocketPair  pair = f->fh_pair;
     BipBuffer   bip;
 
@@ -1736,6 +1738,9 @@ static void fdevent_update(fdevent *fde, unsigned events)
         int  adds    = events  & ~events0;
         if (removes) {
             D("fdevent_update: remove %x from %d\n", removes, fde->fd);
+			wchar_t wLog[MAX_PATH];
+			_stprintf(wLog, L"fdevent_update: remove %x from %d\n", removes, fde->fd);
+			logcat(wLog);
             event_looper_unhook( looper, fde->fd, removes );
         }
         if (adds) {

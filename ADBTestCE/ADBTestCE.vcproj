@@ -169,7 +169,6 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions=" /subsystem:windowsce,5.00"
-				AdditionalDependencies="wce_usbapi.lib"
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
 				StackReserveSize="65536"
@@ -1360,6 +1359,10 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
+				RelativePath=".\adb_api.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\ADBTest.cpp"
 				>
 			</File>
@@ -1665,6 +1668,38 @@
 			</File>
 			<File
 				RelativePath=".\adb\zipfile.cpp"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Json"
+			>
+			<File
+				RelativePath=".\lib_json\json_batchallocator.h"
+				>
+			</File>
+			<File
+				RelativePath=".\lib_json\json_internalarray.inl"
+				>
+			</File>
+			<File
+				RelativePath=".\lib_json\json_internalmap.inl"
+				>
+			</File>
+			<File
+				RelativePath=".\lib_json\json_reader.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\lib_json\json_value.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\lib_json\json_valueiterator.inl"
+				>
+			</File>
+			<File
+				RelativePath=".\lib_json\json_writer.cpp"
 				>
 			</File>
 		</Filter>

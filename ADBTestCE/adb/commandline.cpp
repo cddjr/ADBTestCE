@@ -198,33 +198,6 @@ int usage()
     return 1;
 }
 
-#ifdef HAVE_TERMIO_H
-static struct termios tio_save;
-
-static void stdin_raw_init(int fd)
-{
-    struct termios tio;
-
-    if(tcgetattr(fd, &tio)) return;
-    if(tcgetattr(fd, &tio_save)) return;
-
-    tio.c_lflag = 0; /* disable CANON, ECHO*, etc */
-
-        /* no timeout but request at least one character per read */
-    tio.c_cc[VTIME] = 0;
-    tio.c_cc[VMIN] = 1;
-
-    tcsetattr(fd, TCSANOW, &tio);
-    tcflush(fd, TCIFLUSH);
-}
-
-static void stdin_raw_restore(int fd)
-{
-    tcsetattr(fd, TCSANOW, &tio_save);
-    tcflush(fd, TCIFLUSH);
-}
-#endif
-
 static void read_and_dump(int fd)
 {
     char buf[4096];
@@ -275,88 +248,6 @@ static void copy_to_file(int inFd, int outFd) {
     free(buf);
 }
 
-#if USE_SHELL_WINCE
-static void *stdin_read_thread(void *x)
-{
-    int fd, fdi;
-    unsigned char buf[1024];
-    int r, n;
-    int state = 0;
-
-    int *fds = (int*) x;
-    fd = fds[0];
-    fdi = fds[1];
-    free(fds);
-
-    for(;;) {
-        /* fdi is really the client's stdin, so use read, not adb_read here */
-        D("stdin_read_thread(): pre unix_read(fdi=%d,...)\n", fdi);
-        r = unix_read(fdi, buf, 1024);
-        D("stdin_read_thread(): post unix_read(fdi=%d,...)\n", fdi);
-        if(r == 0) break;
-        if(r < 0) {
-            if(errno == EINTR) continue;
-            break;
-        }
-        for(n = 0; n < r; n++){
-            switch(buf[n]) {
-            case '\n':
-                state = 1;
-                break;
-            case '\r':
-                state = 1;
-                break;
-            case '~':
-                if(state == 1) state++;
-                break;
-            case '.':
-                if(state == 2) {
-                    fprintf(stderr,"\n* disconnect *\n");
-#ifdef HAVE_TERMIO_H
-                    stdin_raw_restore(fdi);
-#endif
-                    exit(0);
-                }
-            default:
-                state = 0;
-            }
-        }
-        r = adb_write(fd, buf, r);
-        if(r <= 0) {
-            break;
-        }
-    }
-    return 0;
-}
-
-int interactive_shell(void)
-{
-    adb_thread_t thr;
-    int fdi, fd;
-    int *fds;
-
-    fd = adb_connect("shell:");
-    if(fd < 0) {
-        fprintf(stderr,"error: %s\n", adb_error());
-        return 1;
-    }
-    fdi = 0; //dup(0);
-
-    fds = (int*)malloc(sizeof(int) * 2);
-    fds[0] = fd;
-    fds[1] = fdi;
-
-#ifdef HAVE_TERMIO_H
-    stdin_raw_init(fdi);
-#endif
-    adb_thread_create(&thr, stdin_read_thread, fds);
-    read_and_dump(fd);
-#ifdef HAVE_TERMIO_H
-    stdin_raw_restore(fdi);
-#endif
-    return 0;
-}
-#endif
 
 static void format_host_command(char* buffer, size_t  buflen, const char* command, transport_type ttype, const char* serial)
 {
@@ -432,24 +323,6 @@ int adb_download_buffer(const char *service, const void* data, int sz,
     adb_close(fd);
     return 0;
 }
-
-#if SIDE_LOAD_UNDERCE
-int adb_download(const char *service, const char *fn, unsigned progress)
-{
-    void *data;
-    unsigned sz;
-
-    data = load_file(fn, &sz);
-    if(data == 0) {
-        fprintf(stderr,"* cannot read '%s' *\n", service);
-        return -1;
-    }
-
-    int status = adb_download_buffer(service, data, sz, progress);
-    free(data);
-    return status;
-}
-#endif
 
 static void status_window(transport_type ttype, const char* serial)
 {
@@ -533,83 +406,6 @@ dupAndQuote(const char *s)
     return ret;
 }
 
-/**
- * Run ppp in "notty" mode against a resource listed as the first parameter
- * eg:
- *
- * ppp dev:/dev/omap_csmi_tty0 <ppp options>
- *
- */
-#if USE_PPP_UNDERCE
-int ppp(int argc, char **argv)
-{
-#ifdef HAVE_WIN32_PROC
-    fprintf(stderr, "error: adb %s not implemented on Win32\n", argv[0]);
-    return -1;
-#else
-    char *adb_service_name;
-    pid_t pid;
-    int fd;
-
-    if (argc < 2) {
-        fprintf(stderr, "usage: adb %s <adb service name> [ppp opts]\n",
-                argv[0]);
-
-        return 1;
-    }
-
-    adb_service_name = argv[1];
-
-    fd = adb_connect(adb_service_name);
-
-    if(fd < 0) {
-        fprintf(stderr,"Error: Could not open adb service: %s. Error: %s\n",
-                adb_service_name, adb_error());
-        return 1;
-    }
-
-    pid = fork();
-
-    if (pid < 0) {
-        perror("from fork()");
-        return 1;
-    } else if (pid == 0) {
-        int err;
-        int i;
-        const char **ppp_args;
-
-        // copy args
-        ppp_args = (const char **) alloca(sizeof(char *) * argc + 1);
-        ppp_args[0] = "pppd";
-        for (i = 2 ; i < argc ; i++) {
-            //argv[2] and beyond become ppp_args[1] and beyond
-            ppp_args[i - 1] = argv[i];
-        }
-        ppp_args[i-1] = NULL;
-
-        // child side
-
-        dup2(fd, STDIN_FILENO);
-        dup2(fd, STDOUT_FILENO);
-        adb_close(STDERR_FILENO);
-        adb_close(fd);
-
-        err = execvp("pppd", (char * const *)ppp_args);
-
-        if (err < 0) {
-            perror("execing pppd");
-        }
-        exit(-1);
-    } else {
-        // parent side
-
-        adb_close(fd);
-        return 0;
-    }
-#endif /* !HAVE_WIN32_PROC */
-}
-#endif
-
 static int send_shellcommand(transport_type transport, char* serial, char* buf)
 {
     int fd, ret;
@@ -631,149 +427,6 @@ static int send_shellcommand(transport_type transport, char* serial, char* buf)
 
     return ret;
 }
-
-#ifdef USE_LOGCAT_UNDERCE
-static int logcat(transport_type transport, char* serial, int argc, char **argv)
-{
-    char buf[4096];
-
-    char *log_tags;
-    char *quoted_log_tags;
-
-    log_tags = getenv("ANDROID_LOG_TAGS");
-    quoted_log_tags = dupAndQuote(log_tags == NULL ? "" : log_tags);
-
-    snprintf(buf, sizeof(buf),
-        "shell:export ANDROID_LOG_TAGS=\"%s\" ; exec logcat",
-        quoted_log_tags);
-
-    free(quoted_log_tags);
-
-    if (!strcmp(argv[0],"longcat")) {
-        strncat(buf, " -v long", sizeof(buf)-1);
-    }
-
-    argc -= 1;
-    argv += 1;
-    while(argc-- > 0) {
-        char *quoted;
-
-        quoted = dupAndQuote (*argv++);
-
-        strncat(buf, " ", sizeof(buf)-1);
-        strncat(buf, quoted, sizeof(buf)-1);
-        free(quoted);
-    }
-
-    send_shellcommand(transport, serial, buf);
-    return 0;
-}
-
-
-static int mkdirs(char *path)
-{
-    int ret;
-    char *x = path + 1;
-
-    for(;;) {
-        x = adb_dirstart(x);
-        if(x == 0) return 0;
-        *x = 0;
-        ret = adb_mkdir(path, 0775);
-        *x = OS_PATH_SEPARATOR;
-        if((ret < 0) && (errno != EEXIST)) {
-            return ret;
-        }
-        x++;
-    }
-    return 0;
-}
-
-static int backup(int argc, char** argv) {
-    char buf[4096];
-    char default_name[32];
-    const char* filename = strcpy(default_name, "./backup.ab");
-    int fd, outFd;
-    int i, j;
-
-    /* find, extract, and use any -f argument */
-    for (i = 1; i < argc; i++) {
-        if (!strcmp("-f", argv[i])) {
-            if (i == argc-1) {
-                fprintf(stderr, "adb: -f passed with no filename\n");
-                return usage();
-            }
-            filename = argv[i+1];
-            for (j = i+2; j <= argc; ) {
-                argv[i++] = argv[j++];
-            }
-            argc -= 2;
-            argv[argc] = NULL;
-        }
-    }
-
-    /* bare "adb backup" or "adb backup -f filename" are not valid invocations */
-    if (argc < 2) return usage();
-
-    adb_unlink(filename);
-    mkdirs((char *)filename);
-    outFd = adb_creat(filename, 0640);
-    if (outFd < 0) {
-        fprintf(stderr, "adb: unable to open file %s\n", filename);
-        return -1;
-    }
-
-    snprintf(buf, sizeof(buf), "backup");
-    for (argc--, argv++; argc; argc--, argv++) {
-        strncat(buf, ":", sizeof(buf) - strlen(buf) - 1);
-        strncat(buf, argv[0], sizeof(buf) - strlen(buf) - 1);
-    }
-
-    D("backup. filename=%s buf=%s\n", filename, buf);
-    fd = adb_connect(buf);
-    if (fd < 0) {
-        fprintf(stderr, "adb: unable to connect for backup\n");
-        adb_close(outFd);
-        return -1;
-    }
-
-    printf("Now unlock your device and confirm the backup operation.\n");
-    copy_to_file(fd, outFd);
-
-    adb_close(fd);
-    adb_close(outFd);
-    return 0;
-}
-
-static int restore(int argc, char** argv) {
-    const char* filename;
-    int fd, tarFd;
-
-    if (argc != 2) return usage();
-
-    filename = argv[1];
-    tarFd = adb_open(filename, 0);
-    if (tarFd < 0) {
-        fprintf(stderr, "adb: unable to open file %s\n", filename);
-        return -1;
-    }
-
-    fd = adb_connect("restore:");
-    if (fd < 0) {
-        fprintf(stderr, "adb: unable to connect for backup\n");
-        adb_close(tarFd);
-        return -1;
-    }
-
-    printf("Now unlock your device and confirm the restore operation.\n");
-    copy_to_file(tarFd, fd);
-
-    adb_close(fd);
-    adb_close(tarFd);
-    return 0;
-}
-#endif
-
 
 #define SENTINEL_FILE "config" OS_PATH_SEPARATOR_STR "envsetup.make"
 static int top_works(const char *top)
@@ -851,79 +504,6 @@ static char *find_top(char path_buf[PATH_MAX])
 #endif
 }
 
-/* <hint> may be:
- * - A simple product name
- *   e.g., "sooner"
-TODO: debug?  sooner-debug, sooner:debug?
- * - A relative path from the CWD to the ANDROID_PRODUCT_OUT dir
- *   e.g., "out/target/product/sooner"
- * - An absolute path to the PRODUCT_OUT dir
- *   e.g., "/src/device/out/target/product/sooner"
- *
- * Given <hint>, try to construct an absolute path to the
- * ANDROID_PRODUCT_OUT dir.
- */
-
-#if ADB_COMMAND_P_UNDERCE
-static const char *find_product_out_path(const char *hint)
-{
-    static char path_buf[PATH_MAX];
-
-    if (hint == NULL || hint[0] == '\0') {
-        return NULL;
-    }
-
-    /* If it's already absolute, don't bother doing any work.
-     */
-    if (adb_is_absolute_host_path(hint)) {
-        strcpy(path_buf, hint);
-        return path_buf;
-    }
-
-    /* If there are any slashes in it, assume it's a relative path;
-     * make it absolute.
-     */
-    if (adb_dirstart(hint) != NULL) {
-        if (getcwd(path_buf, sizeof(path_buf)) == NULL) {
-            fprintf(stderr, "adb: Couldn't get CWD: %s\n", strerror(errno));
-            return NULL;
-        }
-        if (strlen(path_buf) + 1 + strlen(hint) >= sizeof(path_buf)) {
-            fprintf(stderr, "adb: Couldn't assemble path\n");
-            return NULL;
-        }
-        strcat(path_buf, OS_PATH_SEPARATOR_STR);
-        strcat(path_buf, hint);
-        return path_buf;
-    }
-
-    /* It's a string without any slashes.  Try to do something with it.
-     *
-     * Try to find the root of the build tree, and build a PRODUCT_OUT
-     * path from there.
-     */
-    char top_buf[PATH_MAX];
-    const char *top = find_top(top_buf);
-    if (top == NULL) {
-        fprintf(stderr, "adb: Couldn't find top of build tree\n");
-        return NULL;
-    }
-//TODO: if we have a way to indicate debug, look in out/debug/target/...
-    snprintf(path_buf, sizeof(path_buf),
-            "%s" OS_PATH_SEPARATOR_STR
-            "out" OS_PATH_SEPARATOR_STR
-            "target" OS_PATH_SEPARATOR_STR
-            "product" OS_PATH_SEPARATOR_STR
-            "%s", top_buf, hint);
-    if (access(path_buf, F_OK) < 0) {
-        fprintf(stderr, "adb: Couldn't find a product dir "
-                "based on \"-p %s\"; \"%s\" doesn't exist\n", hint, path_buf);
-        return NULL;
-    }
-    return path_buf;
-}
-#endif
-
 int adb_commandline(int argc, char **argv)
 {
 	logcat(L"adb_commandline.");
@@ -937,22 +517,6 @@ int adb_commandline(int argc, char **argv)
     char* serial = NULL;
     char* server_port_str = NULL;
 
-        /* If defined, this should be an absolute path to
-         * the directory containing all of the various system images
-         * for a particular product.  If not defined, and the adb
-         * command requires this information, then the user must
-         * specify the path using "-p".
-         */
-//    gProductOutPath = getenv("ANDROID_PRODUCT_OUT");
-//    if (gProductOutPath == NULL || gProductOutPath[0] == '\0') {
-//        gProductOutPath = NULL;
-//    }
-    // TODO: also try TARGET_PRODUCT/TARGET_DEVICE as a hint
-
-//    serial = getenv("ANDROID_SERIAL");
-
-    /* Validate and assign the server port */
-//    server_port_str = getenv("ANDROID_ADB_SERVER_PORT");
     int server_port = DEFAULT_ADB_PORT;
 
 	logcat(L"before server");
@@ -970,43 +534,6 @@ int adb_commandline(int argc, char **argv)
 		} else {
 			break;
 		}
-#if USE_MORE_PARAMS
-		else if(!strncmp(argv[0], "-p", 2)) {
-            const char *product = NULL;
-            if (argv[0][2] == '\0') {
-                if (argc < 2) return usage();
-                product = argv[1];
-                argc--;
-                argv++;
-            } else {
-                product = argv[0] + 2;
-            }
-            gProductOutPath = find_product_out_path(product);
-            if (gProductOutPath == NULL) {
-                fprintf(stderr, "adb: could not resolve \"-p %s\"\n",
-                        product);
-                return usage();
-            }
-        } else if (argv[0][0]=='-' && argv[0][1]=='s') {
-            if (isdigit(argv[0][2])) {
-                serial = argv[0] + 2;
-            } else {
-                if(argc < 2 || argv[0][2] != '\0') return usage();
-                serial = argv[1];
-                argc--;
-                argv++;
-            }
-        } else if (!strcmp(argv[0],"-d")) {
-            ttype = kTransportUsb;
-        } else if (!strcmp(argv[0],"-e")) {
-            ttype = kTransportLocal;
-        } else {
-                /* out of recognized modifiers and flags */
-            break;
-        }
-        argc--;
-        argv++'
-#endif
     }
 	TCHAR logbuf[32];
 	_stprintf(logbuf, L"serial=%d, type=%d", serial, ttype);

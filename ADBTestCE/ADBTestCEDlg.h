@@ -1,9 +1,10 @@
 // ADBTestCEDlg.h : 头文件
 //
 
-#pragma once
+//#pragma once
 #include "afxwin.h"
 #include "resource.h"
+#include <winsock2.h>
 
 // CADBTestCEDlg 对话框
 class CADBTestCEDlg : public CDialog
@@ -33,5 +34,8 @@ public:
 	afx_msg void OnBnClickedButton1();
 	CEdit m_displayInfo;
 	CString m_logBuffer;
+	SOCKET sockClient;
 	void logcat(TCHAR* log);
+	afx_msg void OnBnClickedButton2();
+	HANDLE closeHandle;
 };

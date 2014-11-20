@@ -519,6 +519,7 @@ void handle_packet(apacket *p, atransport *t)
             send_packet(p, t);
             if(HOST) send_connect(t);
         } else {
+			logcat(L"A_SYNC---CS_OFFLINE");
             t->connection_state = CS_OFFLINE;
             handle_offline(t);
             send_packet(p, t);
@@ -528,6 +529,7 @@ void handle_packet(apacket *p, atransport *t)
     case A_CNXN: /* CONNECT(version, maxdata, "system-id-string") */
             /* XXX verify version, etc */
         if(t->connection_state != CS_OFFLINE) {
+			logcat(L"A_CNXN---CS_OFFLINE");
             t->connection_state = CS_OFFLINE;
             handle_offline(t);
         }
@@ -656,6 +658,7 @@ static void ss_listener_event_func(int _fd, unsigned ev, void *_l)
 
 static void listener_event_func(int _fd, unsigned ev, void *_l)
 {
+	logcat(L"listener_event_func");
     alistener *l = (alistener *)_l;
     asocket *s;
 
@@ -733,6 +736,7 @@ int local_name_to_fd(const char *name)
     }
 
 #endif
+	logcat(L"unknown local portname");
     printf("unknown local portname '%s'\n", name);
     return -1;
 }
@@ -773,11 +777,13 @@ static int install_listener(const char *local_name, const char *connect_to, atra
 
                 /* can't repurpose a smartsocket */
             if(l->connect_to[0] == '*') {
+				logcat(L"can't repurpose a smartsocket");
                 return -1;
             }
 
             cto = _strdup(connect_to);
             if(cto == 0) {
+				logcat(L"cto == 0");
                 return -1;
             }
 
@@ -804,14 +810,17 @@ static int install_listener(const char *local_name, const char *connect_to, atra
         free((void*) l->connect_to);
         free(l);
         printf("cannot bind '%s'\n", local_name);
+		logcat(L"cannot bind");
         return -2;
     }
 
     close_on_exec(l->fd);
     if(!strcmp(l->connect_to, "*smartsocket*")) {
         fdevent_install(&l->fde, l->fd, ss_listener_event_func, l);
+		logcat(L"fdevent_install ss_listener_event_func");
     } else {
         fdevent_install(&l->fde, l->fd, listener_event_func, l);
+		logcat(L"fdevent_install listener_event_func");
     }
     fdevent_set(&l->fde, FDE_READ);
 
@@ -830,6 +839,7 @@ static int install_listener(const char *local_name, const char *connect_to, atra
 
 nomem:
     fatal("cannot allocate listener");
+	logcat(L"cannot allocate listener");
     return 0;
 }
 
@@ -1113,12 +1123,7 @@ static int should_drop_privileges() {
 
 int adb_main(int is_daemon, int server_port)
 {
-#if !ADB_HOST
-    int port;
-    char value[PROPERTY_VALUE_MAX];
 
-    umask(000);
-#endif
 	logcat(L"adb main start!");
     atexit(adb_cleanup);
 	logcat(L"atexit!");
@@ -1131,11 +1136,10 @@ int adb_main(int is_daemon, int server_port)
 
     init_transport_registration();
 
-#if ADB_HOST
     HOST = 1;
     usb_vendors_init();
     usb_init();
-    local_init(DEFAULT_ADB_LOCAL_TRANSPORT_PORT);
+    //local_init(DEFAULT_ADB_LOCAL_TRANSPORT_PORT);
     //adb_auth_init();
 
     char local_name[30];
@@ -1144,102 +1148,7 @@ int adb_main(int is_daemon, int server_port)
         exit(1);
     }
 	logcat(L"install_listener.");
-#else
-    property_get("ro.adb.secure", value, "0");
-    auth_enabled = !strcmp(value, "1");
-    if (auth_enabled)
-        adb_auth_init();
 
-    // Our external storage path may be different than apps, since
-    // we aren't able to bind mount after dropping root.
-    const char* adb_external_storage = getenv("ADB_EXTERNAL_STORAGE");
-    if (NULL != adb_external_storage) {
-        setenv("EXTERNAL_STORAGE", adb_external_storage, 1);
-    } else {
-        D("Warning: ADB_EXTERNAL_STORAGE is not set.  Leaving EXTERNAL_STORAGE"
-          " unchanged.\n");
-    }
-
-    /* don't listen on a port (default 5037) if running in secure mode */
-    /* don't run as root if we are running in secure mode */
-    if (should_drop_privileges()) {
-        struct __user_cap_header_struct header;
-        struct __user_cap_data_struct cap;
-
-        if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0) {
-            exit(1);
-        }
-
-        /* add extra groups:
-        ** AID_ADB to access the USB driver
-        ** AID_LOG to read system logs (adb logcat)
-        ** AID_INPUT to diagnose input issues (getevent)
-        ** AID_INET to diagnose network issues (netcfg, ping)
-        ** AID_GRAPHICS to access the frame buffer
-        ** AID_NET_BT and AID_NET_BT_ADMIN to diagnose bluetooth (hcidump)
-        ** AID_SDCARD_R to allow reading from the SD card
-        ** AID_SDCARD_RW to allow writing to the SD card
-        ** AID_MOUNT to allow unmounting the SD card before rebooting
-        ** AID_NET_BW_STATS to read out qtaguid statistics
-        */
-        gid_t groups[] = { AID_ADB, AID_LOG, AID_INPUT, AID_INET, AID_GRAPHICS,
-                           AID_NET_BT, AID_NET_BT_ADMIN, AID_SDCARD_R, AID_SDCARD_RW,
-                           AID_MOUNT, AID_NET_BW_STATS };
-        if (setgroups(sizeof(groups)/sizeof(groups[0]), groups) != 0) {
-            exit(1);
-        }
-
-        /* then switch user and group to "shell" */
-        if (setgid(AID_SHELL) != 0) {
-            exit(1);
-        }
-        if (setuid(AID_SHELL) != 0) {
-            exit(1);
-        }
-
-        /* set CAP_SYS_BOOT capability, so "adb reboot" will succeed */
-        header.version = _LINUX_CAPABILITY_VERSION;
-        header.pid = 0;
-        cap.effective = cap.permitted = (1 << CAP_SYS_BOOT);
-        cap.inheritable = 0;
-        capset(&header, &cap);
-
-        D("Local port disabled\n");
-    } else {
-        char local_name[30];
-        build_local_name(local_name, sizeof(local_name), server_port);
-        if(install_listener(local_name, "*smartsocket*", NULL)) {
-            exit(1);
-        }
-    }
-
-    int usb = 0;
-    if (access(USB_ADB_PATH, F_OK) == 0 || access(USB_FFS_ADB_EP0, F_OK) == 0) {
-        // listen on USB
-        usb_init();
-        usb = 1;
-    }
-
-    // If one of these properties is set, also listen on that port
-    // If one of the properties isn't set and we couldn't listen on usb,
-    // listen on the default port.
-    property_get("service.adb.tcp.port", value, "");
-    if (!value[0]) {
-        property_get("persist.adb.tcp.port", value, "");
-    }
-    if (sscanf(value, "%d", &port) == 1 && port > 0) {
-        printf("using port=%d\n", port);
-        // listen on TCP port specified by service.adb.tcp.port property
-        local_init(port);
-    } else if (!usb) {
-        // listen on default port
-        local_init(DEFAULT_ADB_LOCAL_TRANSPORT_PORT);
-    }
-
-    D("adb_main(): pre init_jdwp()\n");
-    init_jdwp();
-    D("adb_main(): post init_jdwp()\n");
-#endif
 
     if (is_daemon)
     {
@@ -1488,6 +1397,7 @@ int handle_host_request(char *service, transport_type ttype, char* serial, int r
         }
         if(r == 0) {
                 /* 1st OKAY is connect, 2nd OKAY is status */
+			logcat(L"OKAYOKAY");
             writex(reply_fd, "OKAYOKAY", 8);
             return 0;
         }

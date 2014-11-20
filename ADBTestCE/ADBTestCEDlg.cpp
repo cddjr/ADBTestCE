@@ -2,6 +2,8 @@
 //
 
 #include "stdafx.h"
+#include <string>
+#include <json\json.h>
 #include "ADBTestCE.h"
 #include "ADBTestCEDlg.h"
 
@@ -47,32 +49,6 @@ struct message {
     unsigned int magic;         /* command ^ 0xffffffff             */
 };
 
-//
-// Test routines declarations.
-//
-/*
-int _tmain(int argc, _TCHAR* argv[])
-{
-  // Test enum interfaces.
-  if (!TestEnumInterfaces())
-    return -1;
-
-  if (0 == interface_count) {
-    printf("\nNo ADB interfaces found. Make sure that device is "
-           "connected to USB port and is powered on.");
-    return 1;
-  }
-
-  // Test each interface found in the system
-  if (!TestInterfaces())
-    return -2;
-
-  return 0;
-}
-*/
-
-
-
 // CADBTestCEDlg 对话框
 
 CADBTestCEDlg::CADBTestCEDlg(CWnd* pParent /*=NULL*/)
@@ -93,6 +69,7 @@ BEGIN_MESSAGE_MAP(CADBTestCEDlg, CDialog)
 #endif
 	//}}AFX_MSG_MAP
 	ON_BN_CLICKED(IDC_BUTTON1, &CADBTestCEDlg::OnBnClickedButton1)
+	ON_BN_CLICKED(IDC_BUTTON2, &CADBTestCEDlg::OnBnClickedButton2)
 END_MESSAGE_MAP()
 
 
@@ -157,7 +134,6 @@ void forwardTcp()
 void CADBTestCEDlg::OnBnClickedButton1()
 {
 	HANDLE serverHandle = CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)forwardTcp, NULL, NULL,NULL);
-
 	return ;
 }
 
@@ -167,4 +143,92 @@ void CADBTestCEDlg::logcat(TCHAR* log)
 	//m_logBuffer = log;
 	m_logBuffer.Append(L"\r\n");
 	m_displayInfo.SetWindowTextW(m_logBuffer);
+}
+void receiveFunction(CADBTestCEDlg* dlg);
+void processDownload(const char* data, CADBTestCEDlg* dlg) ;
+void CADBTestCEDlg::OnBnClickedButton2()
+{
+	// TODO: 在此添加控件通知处理程序代码
+	sockClient=socket(AF_INET,SOCK_STREAM,0);// AF_INET ..tcp连接
+	//初始化连接与端口号
+	SOCKADDR_IN addrSrv;
+	addrSrv.sin_addr.S_un.S_addr=inet_addr("127.0.0.1");//本机地址，服务器在本机开启
+	addrSrv.sin_family=AF_INET;
+	addrSrv.sin_port=htons(6666);// 设置端口号
+	if (connect(sockClient,(SOCKADDR*)&addrSrv,sizeof(SOCKADDR)) != 0) {
+		int lastError = WSAGetLastError();
+		wchar_t wLog[MAX_PATH];
+		_stprintf(wLog, L"connect failed! error = %d", lastError);
+		MessageBox(wLog);
+	}
+	closeHandle = CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)receiveFunction, this, NULL,NULL);
+}
+
+void receiveFunction(CADBTestCEDlg* dlg) 
+{
+	const int arrayLength = 4096;
+	char recvBuf[arrayLength];
+	//while(true) {
+		int recvLen = recv(dlg->sockClient,recvBuf,arrayLength,0);
+		if (recvLen == SOCKET_ERROR) {
+			int lastError = WSAGetLastError();
+			wchar_t wLog[MAX_PATH];
+			_stprintf(wLog, L"connect failed! error = %d", lastError);
+			MessageBox(NULL, wLog, NULL, MB_OK);
+		}
+		recvBuf[recvLen] = '\0';
+		wchar_t wLog[512];
+		MultiByteToWideChar(GetACP(), 0, recvBuf, -1, wLog, 512);
+		logcat(wLog);
+		//processDownload(recvBuf, dlg);
+	//}
+		//std::string success_str("transfaner ok");
+		//send(dlg->sockClient, success_str.c_str(), success_str.length(), 0);
+		char testBuf[4096];
+		memset(testBuf, 1, 4096);
+		send(dlg->sockClient, testBuf, 4096, 0);
+	closesocket(dlg->sockClient);
+
+		//dlg->displayInfoBuffer.Append(L"全部下载完成!");
+		//dlg->displayInfoBuffer.Append(L"\r\n");
+		//dlg->displayInfo.SetWindowTextW(dlg->displayInfoBuffer);
+	/*
+	printf("%s\n",recvBuf);
+	TCHAR wLog[MAX_PATH];
+	MultiByteToWideChar(CP_ACP, 0, recvBuf, recvLen, wLog, MAX_PATH);
+	displayInfoBuffer.Append(wLog);
+	displayInfoBuffer.Append(L"\r\n");
+	displayInfo.SetWindowTextW(displayInfoBuffer);
+	send(sockClient,"hello",strlen("hello")+1,0);//发送数据
+	closesocket(sockClient);//关闭连接
+	WSACleanup();
+	*/
+	
+}
+
+void processDownload(const char* data, CADBTestCEDlg* dlg) 
+{
+	Json::Reader reader;
+	Json::Value json_object;
+	if (!reader.parse(data, json_object)) {
+		MessageBox(NULL, L"json parse error!", NULL, MB_OK);
+	}
+	Json::Value file_list;
+	file_list = json_object["filelist"];
+	int file_count = file_list.size();
+	
+	std::vector<std::string> file_list_container;
+
+	for (int i = 0; i < file_count; ++i) {
+		std::string file_name = file_list[i]["name"].asString();
+		file_list_container.push_back(file_name);
+		//if (!downloadFile(file_name, dlg)) {
+			return;
+		//}
+	}
+	/*
+	for (auto fileName : file_list_container) {
+
+	}
+	*/
 }

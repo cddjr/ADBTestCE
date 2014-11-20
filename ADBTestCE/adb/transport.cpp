@@ -190,6 +190,9 @@ write_packet(int  fd, const char* name, apacket** ppacket)
             len -= r;
             p += r;
         } else {
+			wchar_t wLog[MAX_PATH];
+			_stprintf(wLog, L"write_packet (fd=%d) error ret=%d errno=%d", fd, r, errno);
+			logcat(wLog);
             D("%s: write_packet (fd=%d) error ret=%d errno=%d: %s\n", name, fd, r, errno, strerror(errno));
             if((r < 0) && (errno == EINTR)) continue;
             return -1;
@@ -272,24 +275,34 @@ static void *output_thread(void *_t)
     p->msg.magic = A_SYNC ^ 0xffffffff;
     if(write_packet(t->fd, t->serial, &p)) {
         put_apacket(p);
+		logcat(L" failed to write SYNC packet");
         D("%s: failed to write SYNC packet\n", t->serial);
         goto oops;
     }
 
     D("%s: data pump started\n", t->serial);
+	wchar_t wSerial[64];
+	wchar_t wLog[MAX_PATH];
+	MultiByteToWideChar(GetACP(), 0, t->serial, -1, wSerial, 64);
     for(;;) {
         p = get_apacket();
 
         if(t->read_from_remote(p, t) == 0){
             D("%s: received remote packet, sending to transport\n",
               t->serial);
+			
+			_stprintf(wLog, L"%s: received remote packet, sending to transport\n", wSerial);
+			logcat(wLog);
             if(write_packet(t->fd, t->serial, &p)){
                 put_apacket(p);
                 D("%s: failed to write apacket to transport\n", t->serial);
+				_stprintf(wLog, L"%s: failed to write apacket to transport\n", wSerial);
+				logcat(wLog);
                 goto oops;
             }
         } else {
             D("%s: remote read failed for transport\n", t->serial);
+			_stprintf(wLog, L"%s: remote read failed for transport\n", wSerial);
             put_apacket(p);
             break;
         }
@@ -326,28 +339,34 @@ static void *input_thread(void *_t)
         if(read_packet(t->fd, t->serial, &p)) {
             D("%s: failed to read apacket from transport on fd %d\n",
                t->serial, t->fd );
+			logcat(L"failed to read apacket from transport");
             break;
         }
         if(p->msg.command == A_SYNC){
             if(p->msg.arg0 == 0) {
                 D("%s: transport SYNC offline\n", t->serial);
+				logcat(L"transport SYNC offline");
                 put_apacket(p);
                 break;
             } else {
                 if(p->msg.arg1 == t->sync_token) {
                     D("%s: transport SYNC online\n", t->serial);
+					logcat(L"transport SYNC online");
                     active = 1;
                 } else {
                     D("%s: transport ignoring SYNC %d != %d\n",
                       t->serial, p->msg.arg1, t->sync_token);
+					logcat(L"transport SYNC ignoring");
                 }
             }
         } else {
             if(active) {
                 D("%s: transport got packet, sending to remote\n", t->serial);
+				logcat(L"sending to remote");
                 t->write_to_remote(p, t);
             } else {
                 D("%s: transport ignoring packet while offline\n", t->serial);
+				logcat(L"transport ignoring packet while offline");
             }
         }
 
@@ -359,6 +378,7 @@ static void *input_thread(void *_t)
     close_all_sockets(t);
 
     D("%s: transport input thread is exiting, fd %d\n", t->serial, t->fd);
+	logcat(L"transport input thread is exiting");
     kick_transport(t);
     transport_unref(t);
     return 0;
@@ -668,6 +688,7 @@ static void transport_registration_func(int _fd, unsigned ev, void *data)
     update_transports();
 }
 
+//初始化本地事务处理，每个client连接都会有一个专门的处理，对每个client都会在服务端有一对套接字对与该client相连的socket上的数据流进行处理。
 void init_transport_registration(void)
 {
     int s[2];
@@ -1087,6 +1108,7 @@ void unregister_all_tcp_transports()
 
 void register_usb_transport(usb_handle *usb, const char *serial, const char *devpath, unsigned writeable)
 {
+	logcat(L"register_usb_transport");
     atransport *t = (atransport *)calloc(1, sizeof(atransport));
     D("transport: %p init'ing for usb_handle %p (sn='%s')\n", t, usb,
       serial ? serial : "");

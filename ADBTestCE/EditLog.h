@@ -1,8 +1,8 @@
 #pragma once
 
 #include <tchar.h>
-#include "ADBTestCeDlg.h"
 
+class CADBTestCEDlg;
 
 void logcat(TCHAR* log);
 void setMainDialogPointer(CADBTestCEDlg *p);
